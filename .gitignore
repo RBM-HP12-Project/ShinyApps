@@ -6,3 +6,15 @@ polygon_basin.sqlite
 SDI.R
 SDI_wth_Basin_Sel.R
 LowFlow.R
+LowFlow_gauge_ungauge.R
+coor_1.csv
+coor_2.csv
+coordinateLF.csv
+coordinateLF_filter.csv
+Q_prelimscreen_AI.xlsx
+SDI.R
+SDI_wth_Basin_Sel.R
+SDI_wth_Basin_Sel_v1.1.R
+SDI_wth_Basin_Sel_v1.2.R
+SDI_wth_Basin_Sel_v1.3.R
+SDI_wth_Basin_Sel_v1.4.R

@@ -14,7 +14,7 @@ library(zoo)
 library(sf)                # NEW
 
 # ── SDI CALCULATION FUNCTION (for uploaded data) ──────────────────────────────
-calculate_sdi <- function(df, aggregation, ref_date, year_range) {
+calculate_sdi <- function(df, aggregation, ref_date, year_range, return_data = FALSE) {
   df <- df %>%
     arrange(Date) %>%
     mutate(
@@ -34,16 +34,22 @@ calculate_sdi <- function(df, aggregation, ref_date, year_range) {
   df <- df %>%
     filter(year(Date) >= year_range[1], year(Date) <= year_range[2])
   
-  ggplot(df, aes(x = Date, y = SDI)) +
-    geom_line(color = "blue") +
-    geom_hline(yintercept = -1, linetype = "dashed", color = "red") +
-    geom_vline(xintercept = as.Date(ref_date), linetype = "dashed", color = "green", size = 1) +
-    labs(
-      title = paste(aggregation, "Streamflow Drought Index"),
-      x = "Date", y = "SDI"
-    ) +
-    theme_minimal()
+  if (return_data) {
+    return(df %>% select(Date, SDI))
+  }else{
+    ggplot(df, aes(x = Date, y = SDI)) +
+      geom_line(color = "blue") +
+      geom_hline(yintercept = -1, linetype = "dashed", color = "red") +
+      geom_vline(xintercept = as.Date(ref_date), linetype = "dashed", color = "green", size = 1) +
+      labs(
+        title = paste(aggregation, "Streamflow Drought Index"),
+        x = "Date", y = "SDI"
+      ) +
+      theme_minimal()
+  }
 }
+
+station_locations <- read.csv("Q_prelimscreen_AI.csv")
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 ui <- dashboardPage(
@@ -53,7 +59,7 @@ ui <- dashboardPage(
     width = 300,
     sidebarMenu(
       menuItem("SDI (Map)",  tabName = "dashboard", icon = icon("chart-line")),
-      menuItem("Upload CSV", tabName = "upload_tab", icon = icon("upload"))
+      menuItem("SDI Calculator", tabName = "upload_tab", icon = icon("upload"))
     )
   ),
   dashboardBody(
@@ -75,6 +81,24 @@ ui <- dashboardPage(
       }
       .box-header { color: white !important; }
     "))),
+    fluidRow(
+      column(12,
+             tags$div(
+               style = "background-color:#e07e2f; padding: 20px; color: white; text-align: center; border-bottom: 5px solid #d9534f;",
+               fluidRow(
+                 column(2, tags$img(src ="logo-petra2.png", height = "180px")),
+                 column(8,
+                        tags$h3("Hydrological Procedure No. 12 Low Flow and Drought", style = "margin-bottom:0; font-weight:bold;"),
+                        tags$h3("Estimation Tool", style = "margin-top:0; font-weight:bold;"),
+                        tags$h4("Department of Irrigation and Drainage", style = "margin-top:10px;"),
+                        tags$h4("Ministry of Energy Transition and Water Transformation (PETRA)")
+                 ),
+                 column(2, tags$img(src = "jps_logo.jpeg", height = "180px"))
+               )
+             )
+      )
+    )
+    ,
     tabItems(
       # ── Dashboard Tab ──────────────────────────────────────────────────────
       tabItem(tabName = "dashboard",
@@ -110,7 +134,8 @@ ui <- dashboardPage(
                     sliderInput("upload_year_range", "Year Range:",
                                 min = 1960, max = year(Sys.Date()),
                                 value = c(2000, year(Sys.Date())), sep = ""),
-                    actionButton("process_upload", "Calculate SDI")
+                    actionButton("process_upload", "Calculate SDI"),
+                    downloadButton("downloadSDI", "Download Computed SDI"),
                 ),
                 box("Uploaded Data SDI Plot", status = "primary", solidHeader = TRUE, width = 6,
                     plotOutput("upload_sdi_plot", height = 400)
@@ -123,6 +148,7 @@ ui <- dashboardPage(
 
 # ── SERVER ───────────────────────────────────────────────────────────────────
 server <- function(input, output, session) {
+  
   # 1) DB connection
   conn <- dbConnect(SQLite(), "streamflowdb_basin.sqlite")
   onSessionEnded(function() dbDisconnect(conn))
@@ -146,14 +172,15 @@ server <- function(input, output, session) {
         weight      = 1,             # border thickness
         opacity     = 1,             # border opacity
         fillOpacity = 0.5,           # interior opacity
-        label       = ~RB_NAME       # hover labels (adjust if your field is named differently)
+        label       = ~RB_NAME,       # hover labels (adjust if your field is named differently)
+        layerId     = ~RB_NAME   # <-- Add this
       ) %>%
       # add the points on top
       addCircleMarkers(
-        data    = basin_coords,
+        data    = station_locations,
         lng     = ~Longitude, lat = ~Latitude,
-        layerId = ~Basin, color = "blue",
-        radius  = 5, label = ~Basin
+        layerId = ~StationID, color = "blue",
+        radius  = 5, label = ~StationID
       )
   })
   
@@ -230,6 +257,8 @@ server <- function(input, output, session) {
   
   # ── UPLOAD TAB LOGIC ────────────────────────────────────────────────────────
   uploaded_data <- reactiveVal(NULL)
+  sdi_processed <- reactiveVal(NULL)
+  
   observeEvent(input$file, {
     req(input$file)
     df <- read_csv(input$file$datapath,
@@ -238,15 +267,36 @@ server <- function(input, output, session) {
   })
   observeEvent(input$process_upload, {
     req(uploaded_data())
+    
+    processed <- calculate_sdi(
+      df = uploaded_data(),
+      aggregation = input$upload_aggregation,
+      ref_date = input$upload_ref_date,
+      year_range = input$upload_year_range,
+      return_data = TRUE
+    )
+    
+    sdi_processed(processed)  # Store the data for download
+    
     output$upload_sdi_plot <- renderPlot({
       calculate_sdi(
         df = uploaded_data(),
         aggregation = input$upload_aggregation,
         ref_date = input$upload_ref_date,
-        year_range = input$upload_year_range
+        year_range = input$upload_year_range,
+        return_data = FALSE
       )
     })
   })
+  
+  output$downloadSDI <- downloadHandler(
+    filename = "Download_SDI.csv",
+    content = function(file) {
+      df <- sdi_processed()
+      print(is.data.frame(df))
+      write.csv(df, file, row.names = FALSE)
+    }
+  )
 }
 
 shinyApp(ui, server)

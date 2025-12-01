@@ -1,4 +1,4 @@
-#ShinyApps_Project_Archieve 
+# ShinyApps_Project_Archieve 
 
 > [!NOTE]
 > This repository contains all the algorithms and RShiny scripts for both apps, Drought Analysis and Lowflow Analysis.
